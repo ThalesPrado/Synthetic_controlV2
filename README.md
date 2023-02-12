@@ -32,7 +32,7 @@ To finish the placebo test to have an answer if investment in market brought mor
 <img width="939" alt="Placebo" src="https://user-images.githubusercontent.com/83819650/218306536-4b6df545-db30-4dd7-ba68-614d5832cda2.png">
 
 
-***Main goal of the project is to work wirh causal inference and possibly applying the same investment that are similar to SP**.
+***Main goal of the project is to work with causal inference and possibly applying the same investment that are similar to SP**.
 
 
 Thank you 🙏
