@@ -1,0 +1,197 @@
+pacotes <- c("kableExtra","haven","SCtools","devtools","reshape2","tidyverse","ggsci","gridExtra","lubridate",
+             "data.table","modelsummary","broom","lmtest","sandwich","doBy",
+             "openintro","doParallel","Synth","arm","tidysynth","stargazer","jtools","plm","car","caret","carData","dplyr","AER")
+
+## Install all the needed packages to deploy the model
+
+if(sum(as.numeric(!pacotes %in% installed.packages()))!= 0){
+  instalador <- pacotes[!pacotes %in% installed.packages()]
+  for (i in 1: length(instalador)) {
+    install.packages(instalador,dependencies = T)
+    break()}
+  sapply(pacotes, require, character = T)
+} else {
+  sapply(pacotes,require,character = T)
+}
+
+## Bringing the csv to R
+datacontrol <- read.csv("C:\\Users\\thale\\Desktop\\Excel\\20231101_control.csv",
+                        sep = ";")
+str(datacontrol) ## Verify the structure of the dataset
+View(head(datacontrol)) ## Check dataset
+dim(datacontrol) ## Total of rows and columns
+
+
+
+## Data Prep
+# The first step is to reorganize the panel dataset into an appropriate format that is suitable
+# for the main estimator function synth(). At a minimum, synth() requires as inputs the four
+# data matrices X1, X0, Z1, and Z0 that are needed to construct a synthetic control unit. 
+
+dataprep.out <- Synth::dataprep(
+  foo = datacontrol,
+  predictors = c("Receita", "CustoMkt", "AvPreco","PerCapita"),
+  predictors.op = c("mean"),
+  time.predictors.prior = 1:9,
+  dependent = "TotalVendas",
+  unit.variable = "NumeroReg",
+  unit.names.variable = "UF",
+  time.variable = "Mes",
+  treatment.identifier = 1,
+  controls.identifier = c(2:7),
+  time.optimize.ssr = 1:9,
+  time.plot = 1:12)
+
+
+# dataprep() returns a list object dataprep.out that contains several elements including X0,X1,Z0,Z1 
+
+print(dataprep.out$X0)# check 
+print(dataprep.out$X1)# check  2
+print(dataprep.out$Z1)# total sales in SP  pre-intervention period
+
+
+#------------------------------------------
+# data pre-processing/modifications
+#-----------------------------------------
+
+# consolidate two fields and calculate percentage shares
+dataprep.out$X1 <- as.matrix(dataprep.out$X1[-which(rownames(dataprep.out$X1) == "CustoMkt"),])
+dataprep.out$X0["CustoMkt",] <- dataprep.out$X0["CustoMkt",] +dataprep.out$X0["CustoMkt",]
+dataprep.out$X0 <- dataprep.out$X0[-which(rownames(dataprep.out$X0) == "CustoMkt"),]
+
+## Make total and compute the share
+lowest <- which(rownames(dataprep.out$X0) == "Receita")
+highest <- which(rownames(dataprep.out$X0) == "AvPreco")
+dataprep.out$X1[lowest:highest,] <- (100 * dataprep.out$X1[lowest:highest,]) /sum(dataprep.out$X1[lowest:highest,])
+dataprep.out$X0[lowest:highest,] <- 100 * scale(dataprep.out$X0[lowest:highest,],
+                                                center = FALSE,
+                                                scale = colSums(dataprep.out$X0[lowest:highest,]))
+
+
+## Run synthetic control
+synth.out <- synth(data.prep.obj = dataprep.out, method = "BFGS")
+round(synth.out$solution.w,2)
+
+
+## treated unit and its synthetic control unit
+## can be computed by typing
+gaps <- dataprep.out$Y1plot-(dataprep.out$Y0plot%*%synth.out$solution.w)
+gaps
+
+
+## Summarize information
+synth.tables <- synth.tab(
+                 dataprep.res = dataprep.out,
+                 synth.res = synth.out)
+print(synth.tables)
+
+# plot in levels (treated and synthetic)
+path.plot(dataprep.res = dataprep.out,synth.res = synth.out
+          ,Ylab = c("TotalVendas")
+          ,Xlab = c("Mes")
+          ,Legend = c("SP Treated", "SP Synthetic"),
+          abline(v = 10, col="red", lwd=3, lty=2))
+
+# Plot gaps (treated - synthetic)
+gaps.plot(dataprep.res = dataprep.out,synth.res = synth.out
+          ,Ylab = c("TotalVendas")
+          ,Xlab = c("Mes"),
+          abline(v = 10, col="red", lwd=3, lty=2))
+
+
+#--------------------------------------
+# inference via placebo tests
+#-------------------------------------
+
+# These tests involve applying the synthetic control method after reassigning the intervention in the
+# data to units and periods where the intervention did not occur
+
+store <- matrix(NA,length(1:12),7)
+Ids <- c(1,2,3,4,5,6,7)
+colnames(store) <- unique(datacontrol$UF)
+store
+
+for (i in Ids) {
+  dataprep.out <- Synth::dataprep(
+    foo = datacontrol,
+    predictors = c("Receita", "CustoMkt", "AvPreco","PerCapita"),
+    predictors.op = c("mean"),
+    time.predictors.prior = 1:9,
+    dependent = "TotalVendas",
+    unit.variable = "NumeroReg",
+    unit.names.variable = "UF",
+    time.variable = "Mes",
+    treatment.identifier = i,
+    controls.identifier = c(1:7)[-i],
+    time.optimize.ssr = 1:9,
+    time.plot = 1:12)
+  
+# consolidate two fields and calculate percentage shares
+dataprep.out$X1 <- as.matrix(dataprep.out$X1[-which(rownames(dataprep.out$X1) == "CustoMkt"),])
+dataprep.out$X0["CustoMkt",] <- dataprep.out$X0["CustoMkt",] +dataprep.out$X0["CustoMkt",]
+dataprep.out$X0 <- dataprep.out$X0[-which(rownames(dataprep.out$X0) == "CustoMkt"),]
+  
+## Make total and compute the share
+lowest <- which(rownames(dataprep.out$X0) == "Receita")
+highest <- which(rownames(dataprep.out$X0) == "AvPreco")
+dataprep.out$X1[lowest:highest,] <- (100 * dataprep.out$X1[lowest:highest,]) /sum(dataprep.out$X1[lowest:highest,])
+dataprep.out$X0[lowest:highest,] <- 100 * scale(dataprep.out$X0[lowest:highest,],
+                                                  center = FALSE,
+                                                  scale = colSums(dataprep.out$X0[lowest:highest,]))
+  
+  
+## Run synthetic control
+synth.out <- synth(data.prep.obj = dataprep.out, method = "BFGS")
+round(synth.out$solution.w,2)
+  
+  
+## treated unit and its synthetic control unit
+## can be computed by typing
+gaps <- dataprep.out$Y1plot-(dataprep.out$Y0plot%*%synth.out$solution.w)  
+print(gaps)
+
+
+# store gaps
+store[,i] <- dataprep.out$Y1plot - (dataprep.out$Y0plot %*% synth.out$solution.w)
+print(store)
+}
+
+# now do figure
+data <- store
+rownames(data) <- 1:12
+
+# Set bounds in gaps data
+gap.start <- 1
+gap.end <- nrow(data)
+meses <- 1:12
+gap.end.pre  <- which(rownames(data)=="9")
+
+#  MSPE Pre-Treatment
+mse <- apply(data[ gap.start:gap.end.pre,]^2,2,mean)
+sp.mse <- as.numeric(mse[1])
+sp.mse
+
+# Exclude states with 5 times higher MSPE than SP
+data <- data[,mse<5*sp.mse]
+data
+
+# Plot
+plot(meses,data[gap.start:gap.end,which(colnames(data)=="SP")],
+     #ylim=c(-2,2),xlab="year",
+     xlim=c(1,12),ylab="gap in total sales",
+     type="l",lwd=2,col="black",
+     xaxs="i",yaxs="i")
+
+# Add lines for control states
+for (i in 1:ncol(data)) { lines(meses,data[gap.start:gap.end,i],col="gray") }
+
+## Add SP line
+lines(meses,data[gap.start:gap.end,which(colnames(data)=="SP")],lwd=2,col="black")
+
+
+## Add Grid
+abline(v=10,lty="dotted",lwd=2)
+abline(h=0,lty="dashed",lwd=2)
+legend("topleft",legend=c("SP","Control UF"),
+       lty=c(1,1),col=c("black","gray"),lwd=c(2,1),cex=.8)
+text(10,-10,"MKT Investment",cex=Cex.set)
